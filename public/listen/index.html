@@ -164,7 +164,7 @@
       <div class="dial-label">— now tuning —</div>
 
       <!-- 🔧 Change this text to whatever you want the center to say -->
-      <div id="stationName">BILLU RADIO</div>
+      <div id="stationName">RADIO NOWHERE</div>
       <div id="subtitle">frequency unknown, signal certain</div>
 
       <div class="indicator">
@@ -182,7 +182,7 @@
   <script>
     const SIGNALING_URL = window.location.hostname === 'localhost'
       ? 'ws://localhost:8080'
-      : 'wss://billu-radio.onrender.com';
+      : 'wss://REPLACE_WITH_YOUR_SIGNALING_SERVER';
 
     const joinBtn = document.getElementById('joinBtn');
     const statusDot = document.getElementById('statusDot');
@@ -227,6 +227,20 @@
 
       pc.ontrack = (event) => {
         remoteAudio.srcObject = event.streams[0];
+        remoteAudio.muted = false;
+        remoteAudio.volume = 1.0;
+        // Some mobile browsers won't actually start audible playback just from
+        // setting srcObject - force it explicitly right when the track attaches.
+        const playPromise = remoteAudio.play();
+        if (playPromise) {
+          playPromise.catch((err) => {
+            console.warn('Playback blocked, retrying on next tap:', err);
+            setStatus('Tap screen to enable audio', true);
+            document.body.addEventListener('click', () => {
+              remoteAudio.play().catch(() => {});
+            }, { once: true });
+          });
+        }
         setStatus('On Air', true);
       };
 
