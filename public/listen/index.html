@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>On Air</title>
+<style>
+  :root {
+    --amber: #ffb347;
+    --amber-glow: #ffcf7a;
+    --wood-dark: #2a1a12;
+    --wood-light: #4a2f1f;
+    --cream: #f2e3c9;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: radial-gradient(ellipse at center, var(--wood-light) 0%, var(--wood-dark) 100%);
+    font-family: 'Georgia', 'Times New Roman', serif;
+    color: var(--cream);
+    overflow: hidden;
+  }
+
+  /* Film-grain / static overlay to sell the old-radio feel */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+    opacity: 0.35;
+    z-index: 5;
+    animation: grain 0.5s steps(2) infinite;
+  }
+  @keyframes grain {
+    0%, 100% { transform: translate(0,0); }
+    50% { transform: translate(-1%, 1%); }
+  }
+
+  .frame {
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    text-align: center;
+    z-index: 1;
+  }
+
+  /* Wood panel border effect */
+  .cabinet {
+    border: 14px solid var(--wood-dark);
+    border-radius: 18px;
+    box-shadow:
+      inset 0 0 40px rgba(0,0,0,0.6),
+      0 0 60px rgba(0,0,0,0.7);
+    background: linear-gradient(180deg, rgba(0,0,0,0.2), rgba(0,0,0,0.4));
+    padding: 40px 24px;
+    width: 100%;
+    max-width: 380px;
+  }
+
+  .dial-label {
+    font-size: 13px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--amber);
+    opacity: 0.7;
+    margin-bottom: 18px;
+  }
+
+  /* The big customizable center text - tube-glow lettering */
+  #stationName {
+    font-size: 42px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    color: var(--amber-glow);
+    text-shadow:
+      0 0 6px var(--amber),
+      0 0 18px var(--amber),
+      0 0 40px rgba(255,179,71,0.6);
+    animation: flicker 4s infinite;
+    margin: 0 0 8px 0;
+  }
+
+  @keyframes flicker {
+    0%, 96%, 100% { opacity: 1; }
+    97% { opacity: 0.85; }
+    98% { opacity: 1; }
+    99% { opacity: 0.9; }
+  }
+
+  #subtitle {
+    font-size: 13px;
+    color: var(--cream);
+    opacity: 0.6;
+    margin-bottom: 28px;
+    font-style: italic;
+  }
+
+  /* Needle-style status indicator */
+  .indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 28px;
+    font-size: 13px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #666;
+    box-shadow: 0 0 6px rgba(0,0,0,0.5);
+    transition: all 0.3s;
+  }
+  .dot.on {
+    background: #ff5555;
+    box-shadow: 0 0 10px #ff5555, 0 0 20px rgba(255,85,85,0.6);
+  }
+
+  button#joinBtn {
+    background: linear-gradient(180deg, var(--amber-glow), var(--amber));
+    border: none;
+    color: #2a1a12;
+    font-weight: bold;
+    font-family: 'Georgia', serif;
+    font-size: 17px;
+    letter-spacing: 1px;
+    padding: 16px 36px;
+    border-radius: 40px;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #b3762c, 0 6px 12px rgba(0,0,0,0.4);
+    transition: transform 0.1s;
+  }
+  button#joinBtn:active {
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 #b3762c, 0 2px 6px rgba(0,0,0,0.4);
+  }
+  button#joinBtn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  #hint {
+    margin-top: 18px;
+    font-size: 12px;
+    color: var(--cream);
+    opacity: 0.4;
+  }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="cabinet">
+      <div class="dial-label">— now tuning —</div>
+
+      <!-- 🔧 Change this text to whatever you want the center to say -->
+      <div id="stationName">RADIO NOWHERE</div>
+      <div id="subtitle">frequency unknown, signal certain</div>
+
+      <div class="indicator">
+        <div class="dot" id="statusDot"></div>
+        <span id="statusText">Off Air</span>
+      </div>
+
+      <button id="joinBtn">Tap to Join</button>
+      <div id="hint">tap once — your phone will ask to allow audio</div>
+    </div>
+  </div>
+
+  <audio id="remoteAudio" autoplay playsinline></audio>
+
+  <script>
+    const SIGNALING_URL = window.location.hostname === 'localhost'
+      ? 'ws://localhost:8080'
+      : 'wss://REPLACE_WITH_YOUR_SIGNALING_SERVER';
+
+    const joinBtn = document.getElementById('joinBtn');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const remoteAudio = document.getElementById('remoteAudio');
+
+    let ws, pc, joined = false;
+
+    function setStatus(text, live) {
+      statusText.textContent = text;
+      statusDot.classList.toggle('on', !!live);
+    }
+
+    function connect() {
+      ws = new WebSocket(SIGNALING_URL);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'join', role: 'listener' }));
+      };
+
+      ws.onmessage = async (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === 'peer-online') {
+          setStatus('Waiting for stream…', false);
+        } else if (msg.type === 'peer-offline') {
+          setStatus('Off Air', false);
+        } else if (msg.type === 'offer') {
+          await handleOffer(msg.offer);
+        } else if (msg.type === 'ice-candidate') {
+          try { await pc.addIceCandidate(msg.candidate); } catch (e) { console.warn(e); }
+        }
+      };
+
+      ws.onclose = () => setStatus('Disconnected', false);
+    }
+
+    async function handleOffer(offer) {
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+
+      pc.ontrack = (event) => {
+        remoteAudio.srcObject = event.streams[0];
+        setStatus('On Air', true);
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          ws.send(JSON.stringify({ type: 'ice-candidate', candidate: event.candidate }));
+        }
+      };
+
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      ws.send(JSON.stringify({ type: 'answer', answer }));
+    }
+
+    joinBtn.onclick = () => {
+      if (joined) return;
+      joined = true;
+      joinBtn.textContent = 'Connecting…';
+      joinBtn.disabled = true;
+
+      // This tap is what satisfies Safari's autoplay policy - the <audio> element
+      // is now "unlocked" for programmatic playback once a real stream attaches.
+      remoteAudio.play().catch(() => {});
+
+      connect();
+      setStatus('Connecting…', false);
+      setTimeout(() => { joinBtn.style.display = 'none'; }, 800);
+    };
+  </script>
+</body>
+</html>

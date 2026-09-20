@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Broadcast Control</title>
+<style>
+  body {
+    background: #111;
+    color: #eee;
+    font-family: 'Courier New', monospace;
+    max-width: 640px;
+    margin: 40px auto;
+    padding: 0 20px;
+    line-height: 1.5;
+  }
+  h1 { color: #ffb347; }
+  button {
+    background: #ffb347;
+    border: none;
+    color: #111;
+    font-weight: bold;
+    padding: 12px 20px;
+    font-size: 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin: 6px 6px 6px 0;
+  }
+  button:disabled { background: #555; color: #999; cursor: not-allowed; }
+  button.danger { background: #ff5555; }
+  #status { padding: 12px; border-radius: 6px; background: #222; margin: 16px 0; }
+  .live { color: #4caf50; font-weight: bold; }
+  .off { color: #888; }
+  label { display: block; margin-top: 16px; font-size: 14px; color: #aaa; }
+  small { color: #777; }
+</style>
+</head>
+<body>
+  <h1>📡 Broadcast Control</h1>
+  <div id="status" class="off">Not connected</div>
+
+  <label>
+    <input type="checkbox" id="micToggle" checked /> Include microphone
+  </label>
+  <label>
+    <input type="checkbox" id="tabToggle" checked /> Include tab/system audio (YT Music, Spotify web, etc.)
+  </label>
+
+  <div>
+    <button id="startBtn">Go Live</button>
+    <button id="stopBtn" class="danger" disabled>Stop Broadcast</button>
+  </div>
+
+  <p><small>
+    Run this in Chrome or Edge on desktop. When prompted for tab/system audio,
+    pick the tab playing your music (e.g. the YT Music or Spotify Web Player tab)
+    and make sure "Share tab audio" is checked in the browser's share dialog.
+  </small></p>
+
+  <audio id="localMonitor" muted></audio>
+
+  <script>
+    // ---- Config ----
+    // Point this at your deployed signaling server's WebSocket URL.
+    // e.g. wss://your-app.up.railway.app
+    const SIGNALING_URL = window.location.hostname === 'localhost'
+      ? 'ws://localhost:8080'
+      : 'wss://REPLACE_WITH_YOUR_SIGNALING_SERVER';
+
+    const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const micToggle = document.getElementById('micToggle');
+    const tabToggle = document.getElementById('tabToggle');
+
+    let ws, pc, mixedStream, audioCtx;
+    let peerOnline = false;
+
+    function setStatus(text, cls) {
+      statusEl.textContent = text;
+      statusEl.className = cls;
+    }
+
+    function connectSignaling() {
+      ws = new WebSocket(SIGNALING_URL);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'join', role: 'broadcaster' }));
+      };
+
+      ws.onmessage = async (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === 'peer-online') {
+          peerOnline = true;
+          setStatus('Listener connected — starting stream…', 'live');
+          if (mixedStream) await startPeerConnection();
+        } else if (msg.type === 'peer-offline') {
+          peerOnline = false;
+          setStatus(mixedStream ? 'Live — waiting for listener' : 'Not connected', mixedStream ? 'live' : 'off');
+        } else if (msg.type === 'answer') {
+          await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
+        } else if (msg.type === 'ice-candidate') {
+          try { await pc.addIceCandidate(msg.candidate); } catch (e) { console.warn(e); }
+        } else if (msg.type === 'replaced') {
+          setStatus('Another broadcaster tab took over this session.', 'off');
+        }
+      };
+
+      ws.onclose = () => setStatus('Signaling disconnected', 'off');
+    }
+
+    async function buildMixedStream() {
+      audioCtx = new AudioContext();
+      const destination = audioCtx.createMediaStreamDestination();
+      let anySource = false;
+
+      if (micToggle.checked) {
+        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioCtx.createMediaStreamSource(micStream).connect(destination);
+        anySource = true;
+      }
+
+      if (tabToggle.checked) {
+        // getDisplayMedia with audio: true lets the user pick a tab/window/screen
+        // and share its audio. Works reliably for TAB sharing in Chrome/Edge.
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true, // required by spec to trigger the picker; we discard the video track
+          audio: true
+        });
+
+        const audioTracks = displayStream.getAudioTracks();
+        if (audioTracks.length === 0) {
+          alert('No tab audio was shared. Make sure to check "Share tab audio" in the picker.');
+        } else {
+          audioCtx.createMediaStreamSource(new MediaStream(audioTracks)).connect(destination);
+          anySource = true;
+        }
+        // We don't need the video track for a radio stream — stop it immediately.
+        displayStream.getVideoTracks().forEach(t => t.stop());
+      }
+
+      if (!anySource) {
+        throw new Error('No audio source selected.');
+      }
+
+      return destination.stream;
+    }
+
+    async function startPeerConnection() {
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+
+      mixedStream.getAudioTracks().forEach(track => pc.addTrack(track, mixedStream));
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          ws.send(JSON.stringify({ type: 'ice-candidate', candidate: event.candidate }));
+        }
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      ws.send(JSON.stringify({ type: 'offer', offer }));
+    }
+
+    startBtn.onclick = async () => {
+      try {
+        startBtn.disabled = true;
+        setStatus('Requesting audio access…', 'off');
+        mixedStream = await buildMixedStream();
+
+        document.getElementById('localMonitor').srcObject = mixedStream;
+
+        connectSignaling();
+        setStatus('Live — waiting for listener', 'live');
+        stopBtn.disabled = false;
+      } catch (err) {
+        console.error(err);
+        setStatus('Error: ' + err.message, 'off');
+        startBtn.disabled = false;
+      }
+    };
+
+    stopBtn.onclick = () => {
+      if (pc) pc.close();
+      if (ws) ws.close();
+      if (mixedStream) mixedStream.getTracks().forEach(t => t.stop());
+      if (audioCtx) audioCtx.close();
+      setStatus('Not connected', 'off');
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    };
+  </script>
+</body>
+</html>
